@@ -2,13 +2,21 @@
 #include "nav_msgs/Odometry.h"
 #include "ego_planner/Bspline.h"
 #include "quadrotor_msgs/PositionCommand.h"
+#include "geometry_msgs/Pose.h"
 #include "std_msgs/Empty.h"
+#include <mavros_msgs/PositionTarget.h> 
 #include "visualization_msgs/Marker.h"
 #include <ros/ros.h>
 
 ros::Publisher pos_cmd_pub;
+ros::Publisher pose_cmd_pub;
+ros::Publisher target_pub;
 
 quadrotor_msgs::PositionCommand cmd;
+geometry_msgs::Pose pose_cmd;
+mavros_msgs::PositionTarget tar_cmd;
+
+
 double pos_gain[3] = {0, 0, 0};
 double vel_gain[3] = {0, 0, 0};
 
@@ -167,7 +175,7 @@ void cmdCallback(const ros::TimerEvent &e)
     return;
 
   ros::Time time_now = ros::Time::now();
-  double t_cur = (time_now - start_time_).toSec();
+  double t_cur = 0.05 + (time_now - start_time_).toSec();
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
@@ -176,7 +184,7 @@ void cmdCallback(const ros::TimerEvent &e)
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
-    vel = traj_[1].evaluateDeBoorT(t_cur);
+     vel = traj_[1].evaluateDeBoorT(t_cur);
     acc = traj_[2].evaluateDeBoorT(t_cur);
 
     /*** calculate yaw ***/
@@ -227,19 +235,53 @@ void cmdCallback(const ros::TimerEvent &e)
   last_yaw_ = cmd.yaw;
 
   pos_cmd_pub.publish(cmd);
+
+  // pose_cmd.position.x = pos(0);
+  // pose_cmd.position.y = pos(1);
+  // pose_cmd.position.z = pos(2);
+
+  // pose_cmd.orientation.x = 0.0; 
+  // pose_cmd.orientation.y = 0.0;
+  // pose_cmd.orientation.z = sin(yaw_yawdot.first/2);
+  // pose_cmd.orientation.w = cos(yaw_yawdot.first/2);
+
+  // pose_cmd_pub.publish(pose_cmd);
+  
+  tar_cmd.coordinate_frame = 1;
+  tar_cmd.type_mask = 512+2048;
+  tar_cmd.header.frame_id = "world";
+  tar_cmd.header.stamp = time_now;
+  tar_cmd.position.x = pos(0);
+  tar_cmd.position.y = pos(1);
+  tar_cmd.position.z = pos(2);
+
+  tar_cmd.velocity.x = vel(0);
+  tar_cmd.velocity.y = vel(1);
+  tar_cmd.velocity.z = vel(2);
+
+  tar_cmd.acceleration_or_force.x = acc(0);
+  tar_cmd.acceleration_or_force.y = acc(1);
+  tar_cmd.acceleration_or_force.z = acc(2);
+
+  tar_cmd.yaw = yaw_yawdot.first;
+
+  target_pub.publish(tar_cmd);
+
 }
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "traj_server");
-  ros::NodeHandle node;
+  // ros::NodeHandle node;
   ros::NodeHandle nh("~");
 
-  ros::Subscriber bspline_sub = node.subscribe("planning/bspline", 10, bsplineCallback);
+  ros::Subscriber bspline_sub = nh.subscribe("/planning/bspline", 10, bsplineCallback);
 
-  pos_cmd_pub = node.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
+  pos_cmd_pub = nh.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
+  pose_cmd_pub = nh.advertise<geometry_msgs::Pose>("/pose_cmd", 50);
+  target_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 50);
 
-  ros::Timer cmd_timer = node.createTimer(ros::Duration(0.01), cmdCallback);
+  ros::Timer cmd_timer = nh.createTimer(ros::Duration(0.01), cmdCallback);
 
   /* control parameter */
   cmd.kx[0] = pos_gain[0];
